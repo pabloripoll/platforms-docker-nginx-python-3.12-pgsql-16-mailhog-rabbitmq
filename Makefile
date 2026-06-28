@@ -20,18 +20,13 @@ endif
 
 include .env
 
-APIREST_BRANCH:=develop
-APIREST_PROJECT:=$(PROJECT_NAME) - APIREST
-APIREST_CONTAINER:=$(addsuffix -$(APIREST_CAAS), $(PROJECT_LEAD))
-DATABASE_CONTAINER:=$(addsuffix -$(DATABASE_CAAS), $(PROJECT_LEAD))
 ROOT_DIR=$(patsubst %/,%,$(dir $(realpath $(firstword $(MAKEFILE_LIST)))))
 DIR_BASENAME=$(shell basename $(ROOT_DIR))
-
-.PHONY: help
 
 # -------------------------------------------------------------------------------------------------
 #  Help
 # -------------------------------------------------------------------------------------------------
+.PHONY: help
 
 help: ## shows this Makefile help message
 	echo "Usage: $$ make "${C_GRN}"[target]"${C_END}
@@ -41,13 +36,11 @@ help: ## shows this Makefile help message
 # -------------------------------------------------------------------------------------------------
 #  System
 # -------------------------------------------------------------------------------------------------
-.PHONY: local-hostname local-ownership local-ownership-set
+.PHONY: local-info local-ownership local-ownership-set
 
-local-hostname: ## shows local machine ip and container ports set
-	echo "Container Address:"
-	echo ${C_BLU}"LOCAL: "${C_END}"$(word 1,$(shell hostname -I))"
-	echo ${C_BLU}"APIREST: "${C_END}"$(word 1,$(shell hostname -I)):"$(APIREST_PORT)
-	echo ${C_BLU}"DATABASE: "${C_END}"$(word 1,$(shell hostname -I)):"$(DATABASE_PORT)
+local_ip ?= $(word 1,$(shell hostname -I))
+local-info: ## shows local machine ip and container ports set
+	echo ${C_BLU}"Local IP / Hostname:"${C_END} ${C_YEL}"$(local_ip)"${C_END}
 
 user ?= ${USER}
 group ?= root
@@ -58,45 +51,68 @@ local-ownership-set: ## sets recursively local root directory ownership
 	$(SUDO) chown -R ${user}:${group} $(ROOT_DIR)/
 
 # -------------------------------------------------------------------------------------------------
+#  Networking
+# -------------------------------------------------------------------------------------------------
+.PHONY: network-exists network-create network-info network-destroy
+
+network-exists: ## lists all local networks
+	$(DOCKER) network ls
+
+network-create: ## creates network
+	$(DOCKER) network create --driver bridge $(PROJECT_LEAD)-$(PROJECT_CNET)
+
+network-info: ## shows network information
+	$(DOCKER) network inspect $(PROJECT_LEAD)-$(PROJECT_CNET) --format '{{json .Containers}}'
+
+network-destroy: ## destroys network
+	$(DOCKER) network rm $(PROJECT_LEAD)-$(PROJECT_CNET)
+
+# -------------------------------------------------------------------------------------------------
 #  Backend API Service
 # -------------------------------------------------------------------------------------------------
 .PHONY: apirest-hostcheck apirest-info apirest-set apirest-create apirest-network apirest-ssh apirest-start apirest-stop apirest-destroy
 
 apirest-hostcheck: ## shows this project ports availability on local machine for apirest container
-	cd platform/$(APIREST_PLTF) && $(MAKE) port-check
+	cd platforms/$(APIREST_PLTF) && $(MAKE) port-check
 
 apirest-info: ## shows the apirest docker related information
-	cd platform/$(APIREST_PLTF) && $(MAKE) info
+	cd platforms/$(APIREST_PLTF) && $(MAKE) info
 
 apirest-set: ## sets the apirest enviroment file to build the container
-	cd platform/$(APIREST_PLTF) && $(MAKE) env-set
+	cd platforms/$(APIREST_PLTF) && $(MAKE) env-set
 
-apirest-create: ## creates the apirest container from Docker image
-	cd platform/$(APIREST_PLTF) && $(MAKE) build up
+apirest-build: ## builds and ensures changes in the Dockerfile, build steps, or copied-in files are applied
+	cd platforms/$(APIREST_PLTF) && $(MAKE) build
 
-apirest-network: ## creates the apirest container network - execute this recipe first before others
+apirest-create: ## starts up or creates the container for running in detached mode
+	cd platforms/$(APIREST_PLTF) && $(MAKE) up
+
+apirest-network: ## starts up into an existing custom network for container-to-container communication, runnning in detached mode
+	cd platforms/$(APIREST_PLTF) && $(MAKE) clear network
+
+apirest-host-gateway: ## starts up for container-to-host communication, runnning in detached mode
 	$(MAKE) apirest-stop
-	cd platform/$(APIREST_PLTF) && $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.network.yml up -d
+	cd platforms/$(APIREST_PLTF) && $(MAKE) clear host-gateway
 
 apirest-ssh: ## enters the apirest container shell
-	cd platform/$(APIREST_PLTF) && $(MAKE) ssh
+	cd platforms/$(APIREST_PLTF) && $(MAKE) ssh
 
-apirest-start: ## starts the apirest container
-	cd platform/$(APIREST_PLTF) && $(MAKE) start
+apirest-start: ## starts the apirest container running
+	cd platforms/$(APIREST_PLTF) && $(MAKE) start
 
 apirest-stop: ## stops the apirest container but its assets will not be destroyed
-	cd platform/$(APIREST_PLTF) && $(MAKE) stop
+	cd platforms/$(APIREST_PLTF) && $(MAKE) stop
 
 apirest-restart: ## restarts the running apirest container
-	cd platform/$(APIREST_PLTF) && $(MAKE) restart
+	cd platforms/$(APIREST_PLTF) && $(MAKE) restart
 
 apirest-destroy: ## destroys completly the apirest container
 	echo ${C_RED}"Attention!"${C_END};
-	echo ${C_YEL}"You're about to remove the "${C_BLU}"$(APIREST_PROJECT)"${C_END}" container and delete its image resource."${C_END};
+	echo ${C_YEL}"You're about to remove the "${C_BLU}"$(APIREST_PLTF)"${C_END}" container and delete its image resource."${C_END};
 	@echo -n ${C_RED}"Are you sure to proceed? "${C_END}"[y/n]: " && read response && if [ $${response:-'n'} != 'y' ]; then \
         echo ${C_GRN}"K.O.! container has been stopped but not destroyed."${C_END}; \
     else \
-		cd platform/$(APIREST_PLTF) && $(MAKE) stop clear destroy; \
+		cd platforms/$(APIREST_PLTF) && $(MAKE) stop clear destroy; \
 		echo -n ${C_GRN}"Do you want to clear DOCKER cache? "${C_END}"[y/n]: " && read response && if [ $${response:-'n'} != 'y' ]; then \
 			echo ${C_YEL}"The following command is delegated to be executed by user:"${C_END}; \
 			echo "$$ $(DOCKER) system prune"; \
@@ -112,40 +128,42 @@ apirest-destroy: ## destroys completly the apirest container
 .PHONY: db-hostcheck db-info db-set db-create db-ssh db-start db-stop db-destroy
 
 db-hostcheck: ## shows this project ports availability on local machine for database container
-	cd platform/$(DATABASE_PLTF) && $(MAKE) port-check
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) port-check
 
 db-info: ## shows docker related information
-	cd platform/$(DATABASE_PLTF) && $(MAKE) info
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) info
 
 db-set: ## sets the database enviroment file to build the container
-	cd platform/$(DATABASE_PLTF) && $(MAKE) env-set
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) env-set
 
-db-create: ## creates the database container from Docker image
-	cd platform/$(DATABASE_PLTF) && $(MAKE) build up
+db-build: ## builds and ensures changes in the Dockerfile, build steps, or copied-in files are applied
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) build
 
-db-network: ## creates the database container external network
-	$(MAKE) apirest-stop
-	cd platform/$(DATABASE_PLTF) && $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.network.yml up -d
+db-create: ## starts up or creates the container for running in detached mode
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) up
 
-db-ssh: ## enters the apirest container shell
-	cd platform/$(DATABASE_PLTF) && $(MAKE) ssh
+db-network: ## starts up into an existing custom network for container-to-container communication, runnning in detached mode
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) clear network
+
+db-ssh: ## enters the container shell
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) ssh
 
 db-start: ## starts the database container running
-	cd platform/$(DATABASE_PLTF) && $(MAKE) start
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) start
 
 db-stop: ## stops the database container but its assets will not be destroyed
-	cd platform/$(DATABASE_PLTF) && $(MAKE) stop
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) stop
 
 db-restart: ## restarts the running database container
-	cd platform/$(DATABASE_PLTF) && $(MAKE) restart
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) restart
 
 db-destroy: ## destroys completly the database container with its data
 	echo ${C_RED}"Attention!"${C_END};
-	echo ${C_YEL}"You're about to remove the database container and delete its image resource and persistance data."${C_END};
+	echo ${C_YEL}"You're about to remove the "${C_BLU}"$(DATABASE_PLTF)"${C_END}" container and delete its image resource and persistance data."${C_END};
 	@echo -n ${C_RED}"Are you sure to proceed? "${C_END}"[y/n]: " && read response && if [ $${response:-'n'} != 'y' ]; then \
         echo ${C_GRN}"K.O.! container has been stopped but not destroyed."${C_END}; \
     else \
-		cd platform/$(DATABASE_PLTF) && $(MAKE) clear destroy; \
+		cd platforms/$(DATABASE_PLTF) && $(MAKE) clear destroy; \
 		echo -n ${C_GRN}"Do you want to clear DOCKER cache? "${C_END}"[y/n]: " && read response && if [ $${response:-'n'} != 'y' ]; then \
 			echo ${C_YEL}"The following commands are delegated to be executed by user:"${C_END}; \
 			echo "$$ $(DOCKER) system prune"; \
@@ -159,70 +177,123 @@ db-destroy: ## destroys completly the database container with its data
 
 .PHONY: db-test-up db-test-down
 
-db-test-up: ## creates a side database for tests
-	cd platform/$(DATABASE_PLTF) && $(MAKE) db-test-up
+db-test-up: ## creates a side database for testing porpuses
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) test-up
 
-db-test-down: ## drops the side database for tests
-	cd platform/$(DATABASE_PLTF) && $(MAKE) db-test-down
+db-test-down: ## drops the side testing database
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) test-down
 
 .PHONY: db-sql-install db-sql-replace db-sql-backup db-sql-remote db-copy-remote
 
 db-sql-install: ## migrates sql file with schema / data into the container main database to init a project
 	$(MAKE) local-ownership-set;
-	cd platform/$(DATABASE_PLTF) && $(MAKE) sql-install
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) sql-install
 
 db-sql-replace: ## replaces the container main database with the latest database .sql backup file
 	$(MAKE) local-ownership-set;
-	cd platform/$(DATABASE_PLTF) && $(MAKE) sql-replace
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) sql-replace
 
 db-sql-backup: ## copies the container main database as backup into a .sql file
 	$(MAKE) local-ownership-set;
-	cd platform/$(DATABASE_PLTF) && $(MAKE) sql-backup
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) sql-backup
 
 db-sql-drop: ## drops the container main database but recreates the database without schema as a reset action
 	$(MAKE) local-ownership-set;
-	cd platform/$(DATABASE_PLTF) && $(MAKE) sql-drop
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) sql-drop
 
 # -------------------------------------------------------------------------------------------------
 #  Mailer Service
 # -------------------------------------------------------------------------------------------------
-.PHONY: mailhog-hostcheck mailhog-info mailhog-set mailhog-create mailhog-network mailhog-ssh mailhog-start mailhog-stop mailhog-destroy
+.PHONY: mailer-hostcheck mailer-info mailer-set mailer-create mailer-network mailer-ssh mailer-start mailer-stop mailer-destroy
 
-mailhog-hostcheck: ## shows this project ports availability on local machine for broker container
-	cd platform/$(MAILER_PLTF) && $(MAKE) port-check
+mailer-hostcheck: ## shows this project ports availability on local machine for mailer container
+	cd platforms/$(MAILER_PLTF) && $(MAKE) port-check
 
-mailhog-info: ## shows the broker docker related information
-	cd platform/$(MAILER_PLTF) && $(MAKE) info
+mailer-info: ## shows the mailer docker related information
+	cd platforms/$(MAILER_PLTF) && $(MAKE) info
 
-mailhog-set: ## sets the broker enviroment file to build the container
-	cd platform/$(MAILER_PLTF) && $(MAKE) env-set
+mailer-set: ## sets the mailer enviroment file to build the container
+	cd platforms/$(MAILER_PLTF) && $(MAKE) env-set
 
-mailhog-create: ## creates the broker container from Docker image
-	cd platform/$(MAILER_PLTF) && $(MAKE) build up
+mailer-build: ## builds mailer and ensures changes in the Dockerfile, build steps, or copied-in files are applied
+	cd platforms/$(MAILER_PLTF) && $(MAKE) build
 
-mailhog-network: ## creates the broker container network - execute this recipe first before others
-	$(MAKE) mailhog-stop
-	cd platform/$(MAILER_PLTF) && $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.network.yml up -d
+mailer-create: ## starts up mailer or creates the container for running in detached mode
+	cd platforms/$(MAILER_PLTF) && $(MAKE) up
 
-mailhog-ssh: ## enters the broker container shell
-	cd platform/$(MAILER_PLTF) && $(MAKE) ssh
+mailer-network: ## starts up mailer into an existing custom network for container-to-container communication, runnning in detached mode
+	cd platforms/$(MAILER_PLTF) && $(MAKE) clear network
 
-mailhog-start: ## starts the broker container running
-	cd platform/$(MAILER_PLTF) && $(MAKE) start
+mailer-ssh: ## enters the mailer container shell
+	cd platforms/$(MAILER_PLTF) && $(MAKE) ssh
 
-mailhog-stop: ## stops the broker container but its assets will not be destroyed
-	cd platform/$(MAILER_PLTF) && $(MAKE) stop
+mailer-start: ## starts the mailer container running
+	cd platforms/$(MAILER_PLTF) && $(MAKE) start
 
-mailhog-restart: ## restarts the running broker container
-	cd platform/$(MAILER_PLTF) && $(MAKE) restart
+mailer-stop: ## stops the mailer container but its assets will not be destroyed
+	cd platforms/$(MAILER_PLTF) && $(MAKE) stop
 
-mailhog-destroy: ## destroys completly the broker container
+mailer-restart: ## restarts the running mailer container
+	cd platforms/$(MAILER_PLTF) && $(MAKE) restart
+
+mailer-destroy: ## destroys completly the mailer container
 	echo ${C_RED}"Attention!"${C_END};
-	echo ${C_YEL}"You're about to remove the "${C_BLU}"$(MAILER_PROJECT)"${C_END}" container and delete its image resource."${C_END};
+	echo ${C_YEL}"You're about to remove the "${C_BLU}"$(MAILER_PLTF)"${C_END}" container and delete its image resource."${C_END};
 	@echo -n ${C_RED}"Are you sure to proceed? "${C_END}"[y/n]: " && read response && if [ $${response:-'n'} != 'y' ]; then \
         echo ${C_GRN}"K.O.! container has been stopped but not destroyed."${C_END}; \
     else \
-		cd platform/$(MAILER_PLTF) && $(MAKE) stop clear destroy; \
+		cd platforms/$(MAILER_PLTF) && $(MAKE) stop clear destroy; \
+		echo -n ${C_GRN}"Do you want to clear DOCKER cache? "${C_END}"[y/n]: " && read response && if [ $${response:-'n'} != 'y' ]; then \
+			echo ${C_YEL}"The following command is delegated to be executed by user:"${C_END}; \
+			echo "$$ $(DOCKER) system prune"; \
+		else \
+			$(DOCKER) system prune; \
+			echo ${C_GRN}"O.K.! DOCKER cache has been cleared up."${C_END}; \
+		fi \
+	fi
+
+# -------------------------------------------------------------------------------------------------
+#  Broker Service
+# -------------------------------------------------------------------------------------------------
+.PHONY: broker-hostcheck broker-info broker-set broker-create broker-network broker-ssh broker-start broker-stop broker-destroy
+
+broker-hostcheck: ## shows this project ports availability on local machine for broker container
+	cd platforms/$(BROKER_PLTF) && $(MAKE) port-check
+
+broker-info: ## shows the broker docker related information
+	cd platforms/$(BROKER_PLTF) && $(MAKE) info
+
+broker-set: ## sets the broker enviroment file to build the container
+	cd platforms/$(BROKER_PLTF) && $(MAKE) env-set
+
+broker-build: ## builds broker and ensures changes in the Dockerfile, build steps, or copied-in files are applied
+	cd platforms/$(BROKER_PLTF) && $(MAKE) build
+
+broker-create: ## starts up broker or creates the container for running in detached mode
+	cd platforms/$(BROKER_PLTF) && $(MAKE) up
+
+broker-network: ## starts up broker into an existing custom network for container-to-container communication, runnning in detached mode
+	cd platforms/$(BROKER_PLTF) && $(MAKE) clear network
+
+broker-ssh: ## enters the broker container shell
+	cd platforms/$(BROKER_PLTF) && $(MAKE) ssh
+
+broker-start: ## starts the broker container running
+	cd platforms/$(BROKER_PLTF) && $(MAKE) start
+
+broker-stop: ## stops the broker container but its assets will not be destroyed
+	cd platforms/$(BROKER_PLTF) && $(MAKE) stop
+
+broker-restart: ## restarts the running broker container
+	cd platforms/$(BROKER_PLTF) && $(MAKE) restart
+
+broker-destroy: ## destroys completly the broker container
+	echo ${C_RED}"Attention!"${C_END};
+	echo ${C_YEL}"You're about to remove the "${C_BLU}"$(BROKER_PLTF)"${C_END}" container and delete its image resource."${C_END};
+	@echo -n ${C_RED}"Are you sure to proceed? "${C_END}"[y/n]: " && read response && if [ $${response:-'n'} != 'y' ]; then \
+        echo ${C_GRN}"K.O.! container has been stopped but not destroyed."${C_END}; \
+    else \
+		cd platforms/$(BROKER_PLTF) && $(MAKE) stop clear destroy; \
 		echo -n ${C_GRN}"Do you want to clear DOCKER cache? "${C_END}"[y/n]: " && read response && if [ $${response:-'n'} != 'y' ]; then \
 			echo ${C_YEL}"The following command is delegated to be executed by user:"${C_END}; \
 			echo "$$ $(DOCKER) system prune"; \
@@ -241,8 +312,9 @@ repo-flush: ## echoes clearing commands for git repository cache on local IDE an
 	echo ${C_YEL}"Clear repository for untracked files:"${C_END}
 	echo ${C_YEL}"$$"${C_END}" git rm -rf --cached .; git add .; git commit -m \"maint: cache cleared for untracked files\""
 	echo ""
-	echo ${C_YEL}"Platform repository against REST API repository:"${C_END}
-	echo ${C_YEL}"$$"${C_END}" git rm -r --cached -- \"apirest/*\" \":(exclude)apirest/.gitkeep\""
+	echo ${C_YEL}"Detach REST/GRPC API repository from platforms repository:"${C_END}
+	echo ${C_YEL}"$$"${C_END}" git rm -r --cached -- \"api-rest/*\" \":(exclude)api-rest/.gitkeep\""
+	echo ${C_YEL}"$$"${C_END}" git rm -r --cached -- \"api-grpc/*\" \":(exclude)api-grpc/.gitkeep\""
 
 repo-commit: ## echoes common git commands
 	echo ${C_YEL}"Common commiting commands:"${C_END}
