@@ -204,7 +204,7 @@ $ yes | make apirest-destroy db-destroy mailer-destroy broker-destroy
 Repository directories structure overview
 ```sh
 .
-├── api-rest                     # detached repository
+├── api-rest                    # detached repository
 │   ├── src
 │   ├── .env
 │   ├── vendor
@@ -219,7 +219,7 @@ Repository directories structure overview
 │   │   │   └── Dockerfile
 │   │   └── Makefile
 │   │
-│   ├── postgre-18
+│   ├── postgre-16
 │   │   ├── docker
 │   │   │   ├── .env
 │   │   │   ├── docker-compose.yml
