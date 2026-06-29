@@ -1,7 +1,7 @@
 # .gitignore custom settings
 /Dockerfile
-/config/php/conf.d/*
-!/config/php/conf.d/.gitkeep
+/config/python/conf.d/*
+!/config/python/conf.d/.gitkeep
 /config/nginx/conf.d/*
 !/config/nginx/conf.d/.gitkeep
 /config/supervisor/conf.d/*
