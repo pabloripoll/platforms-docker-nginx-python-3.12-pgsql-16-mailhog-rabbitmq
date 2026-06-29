@@ -15,7 +15,7 @@ This Infrastructure Platform repository is designed for back-end projects and pr
 
 ## Platforms for Full-Stack Project
 
-- API: [NGINX + PYTHON 3.12](./platforms/nginx-py-3.12/README.md)
+- API: [NGINX + PYTHON 3.12](./platforms/nginx-python-3.12/README.md)
 - Database: [POSTGRE 16](./platforms/pgsql-16/README.md)
 - Mail Service: [MAILHOG 1+](./platforms/mailhog-1/README.md)
 - Message Broker: [RABBITMQ 4+](./platforms/rabbitmq-4/README.md)
@@ -211,7 +211,7 @@ Repository directories structure overview
 │   └── ...etc
 │
 ├── platforms                   # remote infrastructure platforms
-│   ├── nginx-py-3.12
+│   ├── nginx-python-3.12
 │   │   ├── docker
 │   │   │   ├── config
 │   │   │   ├── .env
